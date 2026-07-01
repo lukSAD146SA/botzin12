@@ -1,0 +1,576 @@
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers,
+  ],
+});
+
+const TOKEN              = process.env.TOKEN;
+const GUILD_ID           = "1508302017980924064";
+const MUTE_MS            = 5 * 60 * 1000;
+const CANAL_SUGESTOES_ID = "<#1511518813701804062>";
+const CANAL_LOGS_ID      = "1510353328821764289";
+
+const economia = {};
+
+const CARGOS_ISENTOS = ["1509304131263926292", "1508405150572871720"];
+
+// ============================================================
+// CONFIG DA LOJA
+// ============================================================
+const LOJA = [
+  {
+    id: "vip",
+    nome: "🌟 Cargo VIP",
+    preco: 500,
+    roleId: "<@&1521544208073228528>",
+  },
+];
+
+// ============================================================
+// FUNÇÕES DE ECONOMIA
+// ============================================================
+function getPerfil(userId) {
+  if (!economia[userId]) {
+    economia[userId] = { saldo: 0, ultimoDiario: 0, ultimoTrabalho: 0 };
+  }
+  return economia[userId];
+}
+
+function formatarTempo(ms) {
+  const horas   = Math.floor(ms / 3600000);
+  const minutos = Math.floor((ms % 3600000) / 60000);
+  return `${horas}h ${minutos}m`;
+}
+
+// ============================================================
+// FUNÇÃO DE LOG
+// ============================================================
+async function enviarLog(guild, embed) {
+  try {
+    const canal = await guild.channels.fetch(CANAL_LOGS_ID);
+    if (canal) await canal.send({ embeds: [embed] });
+  } catch (err) {
+    console.error("[ERRO LOG]", err.message);
+  }
+}
+
+// ============================================================
+// PALAVRÕES — com word boundary pra evitar falsos positivos
+// ============================================================
+const PALAVROES = [
+  // Variações de foda
+  "foda", "fodas", "fodasse", "fodase", "fudeu", "fudendo", "fudido",
+  "foder", "fodam", "fodao", "fodão", "foda-se",
+  "vai se foder", "vai foder",
+
+  // Merda
+  "merda", "merdinha", "merdao", "merdão",
+
+  // Puta / FDP
+  "puta", "puto", "putinha", "putão", "putaria",
+  "fdp", "filhadaputa", "filhodaputa",
+  "filha da puta", "filho da puta",
+  "filha de puta", "filho de puta",
+
+  // Caralho
+  "caralho", "carai", "crl",
+
+  // Porra
+  "porra", "porrinha", "porrada",
+
+  // Cu — só a palavra sozinha, não pega "curso", "acusar"
+  "cuzao", "cuzão", "cuzinho", "cuzona",
+  "tomar no cu", "vai tomar no cu", "vtc",
+
+  // Buceta
+  "buceta", "bct", "bucetinha", "bucetao", "bucetão",
+
+  // Viado
+  "viado", "viadinho", "viadao", "viadão", "viadagem",
+
+  // Corno
+  "corno", "corna", "cornao", "cornão",
+
+  // Arrombado
+  "arrombado", "arrombada", "arrombao", "arrombão",
+
+  // Idiota / Imbecil
+  "idiota", "imbecil",
+
+  // Otário
+  "otario", "otário", "otarinho",
+
+  // Babaca
+  "babaca", "babaquice",
+
+  // Safado
+  "safado", "safada", "safadao", "safadão", "safadinha",
+
+  // Vagabundo
+  "vagabundo", "vagabunda", "vagabundao", "vagabundão",
+
+  // Bosta
+  "bosta", "bostinha", "bostao", "bostão",
+
+  // Cagar
+  "cagando", "cagar", "cagou", "cagão", "caguei", "cagada",
+
+  // Piranha
+  "piranha", "piranhao", "piranhão",
+
+  // Piroca / Rola
+  "piroca", "pirocao", "pirocão",
+  "rolinha", "rolao", "rolão",
+
+  // Cacete
+  "cacete", "cacetao", "cacetão",
+
+  // Punheta
+  "punheta", "punhetao", "punhetão", "punheteiro",
+
+  // Broxa
+  "broxa", "broxou", "broxar", "broxada",
+
+  // Desgraça
+  "desgraça", "desgraçado", "desgracado", "desgraçada",
+
+  // Escroto
+  "escroto", "escrota", "escrotao", "escrotão",
+
+  // Retardado
+  "retardado", "retardada", "retardadao", "retardadão",
+
+  // Cretino
+  "cretino", "cretina", "cretinagem",
+
+  // Abreviações
+  "pqp", "vsf", "tmnc", "tnc", "kct", "vtmc",
+
+  // Família
+  "sua mae", "sua mãe", "sua vó", "sua vo",
+  "vai se foder", "vai a merda", "vai se ferrar",
+
+  // Racismo / nazismo
+  "nazista", "nazismo", "racista", "racismo",
+  "fascista", "fascismo", "terrorista",
+
+  // Outros
+  "lazarento", "prostituta",
+  "nojento", "nojenta",
+  "escoria", "escória",
+];
+
+// Palavras que precisam ser exatas (word boundary) pra não pegar falso positivo
+const PALAVROES_EXATAS = [
+  "cu", "lixo", "burro", "burra", "anta", "pinto",
+  "rola", "merd", "porr", "bct", "inutil", "inútil",
+  "macaco", "macaca", "hitler", "nazi",
+];
+
+function buildPattern(word) {
+  return word.split("").map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "+").join("");
+}
+
+// Padrões normais (podem estar dentro de outras palavras)
+const PADROES = PALAVROES.map(
+  (p) => new RegExp(buildPattern(p), "gi")
+);
+
+// Padrões exatos (word boundary — só detecta a palavra sozinha)
+const PADROES_EXATOS = PALAVROES_EXATAS.map(
+  (p) => new RegExp(`\\b${buildPattern(p)}\\b`, "gi")
+);
+
+function contemPalavrão(texto) {
+  const todosPadroes = [...PADROES, ...PADROES_EXATOS];
+  return todosPadroes.some((regex) => { regex.lastIndex = 0; return regex.test(texto); });
+}
+
+// ============================================================
+// BOT PRONTO — registro de comandos
+// ============================================================
+client.once("clientReady", async () => {
+  console.log(`✅ Bot online como ${client.user.tag}`);
+
+  const commands = [
+    new SlashCommandBuilder()
+      .setName("say")
+      .setDescription("Faz o bot enviar uma mensagem")
+      .addStringOption((opt) =>
+        opt.setName("mensagem").setDescription("O que o bot vai dizer").setRequired(true)
+      )
+      .addChannelOption((opt) =>
+        opt.setName("canal").setDescription("Canal de destino (padrão: atual)").setRequired(false)
+      ),
+
+    new SlashCommandBuilder()
+      .setName("avatar")
+      .setDescription("Mostra a foto de perfil de alguém em tamanho grande")
+      .addUserOption((opt) =>
+        opt.setName("usuario").setDescription("De quem ver o avatar").setRequired(false)
+      ),
+
+    new SlashCommandBuilder()
+      .setName("video")
+      .setDescription("Anuncia um vídeo novo do YouTube")
+      .addStringOption((opt) =>
+        opt.setName("link").setDescription("Link do vídeo do YouTube").setRequired(true)
+      )
+      .addChannelOption((opt) =>
+        opt.setName("canal").setDescription("Canal onde anunciar").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("titulo").setDescription("Título personalizado (opcional)").setRequired(false)
+      )
+      .addStringOption((opt) =>
+        opt.setName("imagem").setDescription("Link direto de imagem (opcional)").setRequired(false)
+      ),
+
+    new SlashCommandBuilder()
+      .setName("diario")
+      .setDescription("Resgata sua recompensa diária de ZéCoins"),
+
+    new SlashCommandBuilder()
+      .setName("trabalhar")
+      .setDescription("Trabalhe para ganhar ZéCoins (a cada 1 hora)"),
+
+    new SlashCommandBuilder()
+      .setName("carteira")
+      .setDescription("Veja seu saldo de ZéCoins")
+      .addUserOption((opt) =>
+        opt.setName("usuario").setDescription("Ver saldo de outra pessoa").setRequired(false)
+      ),
+
+    new SlashCommandBuilder()
+      .setName("loja")
+      .setDescription("Veja os itens disponíveis na loja"),
+
+    new SlashCommandBuilder()
+      .setName("comprar")
+      .setDescription("Compra um item da loja")
+      .addStringOption((opt) =>
+        opt.setName("item").setDescription("ID do item (veja em /loja)").setRequired(true)
+      ),
+
+    new SlashCommandBuilder()
+      .setName("rank")
+      .setDescription("Veja o ranking dos membros mais ricos"),
+
+    new SlashCommandBuilder()
+      .setName("dar-moedas")
+      .setDescription("[ADMIN] Dá ZéCoins para alguém")
+      .addUserOption((opt) =>
+        opt.setName("usuario").setDescription("Quem vai receber").setRequired(true)
+      )
+      .addIntegerOption((opt) =>
+        opt.setName("quantidade").setDescription("Quantas moedas dar").setRequired(true)
+      ),
+  ].map((cmd) => cmd.toJSON());
+
+  const rest = new REST({ version: "10" }).setToken(TOKEN);
+  try {
+    await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body: commands });
+    console.log("✅ Comandos registrados!");
+  } catch (err) {
+    console.error("[ERRO COMANDOS]", err.message);
+  }
+});
+
+// ============================================================
+// MENSAGENS
+// ============================================================
+client.on("messageCreate", async (message) => {
+  if (message.author.bot || !message.guild) return;
+
+  // ---- AUTO-CHECK SUGESTÕES ----
+  if (message.channel.id === CANAL_SUGESTOES_ID) {
+    try {
+      await message.react("✅");
+      await message.reply("Certo, iremos ver se conseguimos o mais rápido possível!");
+    } catch (err) {
+      console.error("[ERRO AUTO-CHECK]", err.message);
+    }
+    return;
+  }
+
+  // ---- COMANDOS DE TEXTO ----
+  if (message.content.startsWith("!clearwarns")) {
+    if (!message.member.permissions.has("ManageGuild")) return;
+    const member = message.mentions.members.first();
+    if (!member) return message.reply("Menciona um usuário.");
+    return message.reply(`✅ Feito!`);
+  }
+
+  // ---- AUTOMOD ----
+  if (!contemPalavrão(message.content)) return;
+
+  const temCargoIsento = message.member.roles.cache.some((role) =>
+    CARGOS_ISENTOS.includes(role.id)
+  );
+  if (temCargoIsento) return;
+
+  const userId  = message.author.id;
+  const msgText = message.content;
+
+  try { await message.delete(); } catch {}
+
+  // Só muta, sem warn
+  try {
+    await message.member.timeout(MUTE_MS, "Automod: linguagem inapropriada");
+
+    await message.channel.send(
+      `⚠️ ${message.author}, linguagem inapropriada! Você foi mutado por 5 minutos.`
+    );
+
+    console.log(`[MUTE] ${message.author.tag} mutado.`);
+
+    // Log no canal
+    const logEmbed = new EmbedBuilder()
+      .setTitle("🔇 Mute Automático")
+      .setColor("Orange")
+      .addFields(
+        { name: "Usuário",  value: `${message.author.tag} (\`${userId}\`)` },
+        { name: "Canal",    value: `<#${message.channel.id}>` },
+        { name: "Mensagem", value: `||${msgText.slice(0, 200)}||` },
+        { name: "Duração",  value: "5 minutos" }
+      )
+      .setTimestamp();
+
+    await enviarLog(message.guild, logEmbed);
+
+  } catch (err) {
+    console.error(`[ERRO MUTE] ${err.message}`);
+  }
+});
+
+// ============================================================
+// SLASH COMMANDS
+// ============================================================
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+
+  // ---- /say ----
+  if (interaction.commandName === "say") {
+    if (!interaction.member.permissions.has("Administrator")) {
+      return interaction.reply({ content: "❌ Sem permissão.", ephemeral: true });
+    }
+    const texto = interaction.options.getString("mensagem");
+    const canal = interaction.options.getChannel("canal") || interaction.channel;
+    await canal.send(texto);
+    await interaction.reply({ content: "✅ Mensagem enviada!", ephemeral: true });
+  }
+
+  // ---- /avatar ----
+  if (interaction.commandName === "avatar") {
+    const user      = interaction.options.getUser("usuario") || interaction.user;
+    const avatarUrl = user.displayAvatarURL({ size: 1024, extension: "png" });
+
+    const embed = new EmbedBuilder()
+      .setTitle(`Avatar de ${user.username}`)
+      .setImage(avatarUrl)
+      .setColor("Blue");
+
+    await interaction.reply({ embeds: [embed] });
+  }
+
+  // ---- /video ----
+  if (interaction.commandName === "video") {
+    if (!interaction.member.permissions.has("Administrator")) {
+      return interaction.reply({ content: "❌ Sem permissão.", ephemeral: true });
+    }
+
+    const link   = interaction.options.getString("link");
+    const canal  = interaction.options.getChannel("canal");
+    const titulo = interaction.options.getString("titulo");
+    const imagem = interaction.options.getString("imagem");
+
+    const videoIdMatch = link.match(/(?:youtu\.be\/|v=)([a-zA-Z0-9_-]{11})/);
+    const thumbnailUrl = imagem || (videoIdMatch
+      ? `https://img.youtube.com/vi/${videoIdMatch[1]}/maxresdefault.jpg`
+      : null);
+
+    const embed = new EmbedBuilder()
+      .setTitle(`🔥 ${titulo || "VÍDEO NOVO"}`)
+      .setDescription(`📌 **Assista agora:**\n[CLIQUE AQUI PARA VER O VÍDEO](${link})`)
+      .setColor("Red")
+      .setFooter({ text: `${interaction.guild.name} • Notificação Automática` })
+      .setTimestamp();
+
+    if (thumbnailUrl) embed.setImage(thumbnailUrl);
+
+    await canal.send({ content: "🔔 **Fala galera, vídeo novo no canal!**", embeds: [embed] });
+    await interaction.reply({ content: "✅ Anúncio enviado!", ephemeral: true });
+  }
+
+  // ---- /diario ----
+  if (interaction.commandName === "diario") {
+    const perfil   = getPerfil(interaction.user.id);
+    const agora    = Date.now();
+    const cooldown = 24 * 60 * 60 * 1000;
+
+    if (agora - perfil.ultimoDiario < cooldown) {
+      const restante = cooldown - (agora - perfil.ultimoDiario);
+      return interaction.reply({
+        content: `⏳ Você já resgatou hoje! Volte em **${formatarTempo(restante)}**.`,
+        ephemeral: true,
+      });
+    }
+
+    const recompensa = Math.floor(Math.random() * 51) + 50;
+    perfil.saldo += recompensa;
+    perfil.ultimoDiario = agora;
+
+    await interaction.reply(
+      `💰 ${interaction.user} resgatou **${recompensa} ZéCoins**! Saldo atual: **${perfil.saldo} ZéCoins**`
+    );
+  }
+
+  // ---- /trabalhar ----
+  if (interaction.commandName === "trabalhar") {
+    const perfil   = getPerfil(interaction.user.id);
+    const agora    = Date.now();
+    const cooldown = 60 * 60 * 1000;
+
+    if (agora - perfil.ultimoTrabalho < cooldown) {
+      const restante = cooldown - (agora - perfil.ultimoTrabalho);
+      return interaction.reply({
+        content: `⏳ Você está cansado! Volte em **${formatarTempo(restante)}**.`,
+        ephemeral: true,
+      });
+    }
+
+    const trabalhos = [
+      "entregou pizza e ganhou",
+      "consertou um computador e faturou",
+      "vendeu um script raro e lucrou",
+      "ajudou um streamer e recebeu",
+      "fez um frila de design e cobrou",
+    ];
+
+    const trabalho = trabalhos[Math.floor(Math.random() * trabalhos.length)];
+    const ganho    = Math.floor(Math.random() * 26) + 15;
+
+    perfil.saldo += ganho;
+    perfil.ultimoTrabalho = agora;
+
+    await interaction.reply(
+      `💼 ${interaction.user} ${trabalho} **${ganho} ZéCoins**! Saldo atual: **${perfil.saldo} ZéCoins**`
+    );
+  }
+
+  // ---- /carteira ----
+  if (interaction.commandName === "carteira") {
+    const user   = interaction.options.getUser("usuario") || interaction.user;
+    const perfil = getPerfil(user.id);
+
+    const embed = new EmbedBuilder()
+      .setTitle(`💰 Carteira de ${user.username}`)
+      .setDescription(`Saldo: **${perfil.saldo} ZéCoins**`)
+      .setColor("Gold")
+      .setThumbnail(user.displayAvatarURL());
+
+    await interaction.reply({ embeds: [embed] });
+  }
+
+  // ---- /loja ----
+  if (interaction.commandName === "loja") {
+    const embed = new EmbedBuilder()
+      .setTitle("🛒 Loja ZéCoins")
+      .setColor("Purple")
+      .setDescription(
+        LOJA.map((item) =>
+          `**${item.nome}** — \`${item.preco} ZéCoins\`\nID: \`${item.id}\``
+        ).join("\n\n")
+      )
+      .setFooter({ text: "Use /comprar item:ID para comprar" });
+
+    await interaction.reply({ embeds: [embed] });
+  }
+
+  // ---- /comprar ----
+  if (interaction.commandName === "comprar") {
+    const itemId = interaction.options.getString("item");
+    const item   = LOJA.find((i) => i.id === itemId);
+
+    if (!item) {
+      return interaction.reply({
+        content: "❌ Item não encontrado. Use `/loja` pra ver os IDs.",
+        ephemeral: true,
+      });
+    }
+
+    const perfil = getPerfil(interaction.user.id);
+
+    if (perfil.saldo < item.preco) {
+      return interaction.reply({
+        content: `❌ Saldo insuficiente! Você tem **${perfil.saldo}** e precisa de **${item.preco} ZéCoins**.`,
+        ephemeral: true,
+      });
+    }
+
+    perfil.saldo -= item.preco;
+
+    try {
+      await interaction.member.roles.add(item.roleId);
+      await interaction.reply(`✅ Você comprou **${item.nome}**! Cargo adicionado.`);
+    } catch (err) {
+      perfil.saldo += item.preco;
+      console.error("[ERRO COMPRA]", err.message);
+      await interaction.reply({
+        content: "❌ Erro ao adicionar o cargo. Avisa um admin!",
+        ephemeral: true,
+      });
+    }
+  }
+
+  // ---- /rank ----
+  if (interaction.commandName === "rank") {
+    const ranking = Object.entries(economia)
+      .sort(([, a], [, b]) => b.saldo - a.saldo)
+      .slice(0, 10);
+
+    if (ranking.length === 0) {
+      return interaction.reply("Ninguém tem ZéCoins ainda!");
+    }
+
+    const linhas = await Promise.all(
+      ranking.map(async ([userId, dados], index) => {
+        const user = await client.users.fetch(userId).catch(() => null);
+        const nome = user ? user.username : "Desconhecido";
+        const medalha = ["🥇", "🥈", "🥉"][index] || `${index + 1}º`;
+        return `${medalha} **${nome}** — ${dados.saldo} ZéCoins`;
+      })
+    );
+
+    const embed = new EmbedBuilder()
+      .setTitle("🏆 Ranking ZéCoins")
+      .setDescription(linhas.join("\n"))
+      .setColor("Gold");
+
+    await interaction.reply({ embeds: [embed] });
+  }
+
+  // ---- /dar-moedas ----
+  if (interaction.commandName === "dar-moedas") {
+    if (!interaction.member.permissions.has("Administrator")) {
+      return interaction.reply({ content: "❌ Sem permissão.", ephemeral: true });
+    }
+
+    const user   = interaction.options.getUser("usuario");
+    const qtd    = interaction.options.getInteger("quantidade");
+    const perfil = getPerfil(user.id);
+
+    perfil.saldo += qtd;
+
+    await interaction.reply(
+      `✅ ${user} recebeu **${qtd} ZéCoins**! Saldo atual: **${perfil.saldo}**`
+    );
+  }
+});
+
+client.login(TOKEN);
