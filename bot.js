@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 
 const client = new Client({
   intents: [
@@ -12,27 +12,51 @@ const client = new Client({
 const TOKEN              = process.env.TOKEN;
 const GUILD_ID           = "1508302017980924064";
 const MUTE_MS            = 5 * 60 * 1000;
-const CANAL_SUGESTOES_ID = "<#1511518813701804062>";
+const CANAL_SUGESTOES_ID = "1511518813701804062";
 const CANAL_LOGS_ID      = "1510353328821764289";
 
-const economia = {};
+const economia    = {};
+const apostas     = {};
+const inventarios = {};
 
 const CARGOS_ISENTOS = ["1509304131263926292", "1508405150572871720"];
 
 // ============================================================
-// CONFIG DA LOJA
+// LOJA
 // ============================================================
 const LOJA = [
   {
     id: "vip",
     nome: "🌟 Cargo VIP",
     preco: 500,
-    roleId: "<@&1521544208073228528>",
+    roleId: "1521544208073228528",
+    tipo: "cargo",
+  },
+  {
+    id: "silenciador",
+    nome: "🔇 Silenciador",
+    preco: 5000,
+    tipo: "item",
+    descricao: "Muta alguém por 5 minutos. Use: /usar item:silenciador",
+  },
+  {
+    id: "apelido",
+    nome: "🏷️ Apelido",
+    preco: 1000,
+    tipo: "item",
+    descricao: "Muda o apelido de alguém por 1h. Use: /usar item:apelido",
+  },
+  {
+    id: "caixa",
+    nome: "🎁 Caixa Misteriosa",
+    preco: 5000,
+    tipo: "item",
+    descricao: "Ganhe entre 100 e 10.000 ZéCoins. Use: /usar item:caixa",
   },
 ];
 
 // ============================================================
-// FUNÇÕES DE ECONOMIA
+// FUNÇÕES AUXILIARES
 // ============================================================
 function getPerfil(userId) {
   if (!economia[userId]) {
@@ -41,15 +65,17 @@ function getPerfil(userId) {
   return economia[userId];
 }
 
+function getInventario(userId) {
+  if (!inventarios[userId]) inventarios[userId] = {};
+  return inventarios[userId];
+}
+
 function formatarTempo(ms) {
   const horas   = Math.floor(ms / 3600000);
   const minutos = Math.floor((ms % 3600000) / 60000);
   return `${horas}h ${minutos}m`;
 }
 
-// ============================================================
-// FUNÇÃO DE LOG
-// ============================================================
 async function enviarLog(guild, embed) {
   try {
     const canal = await guild.channels.fetch(CANAL_LOGS_ID);
@@ -60,112 +86,52 @@ async function enviarLog(guild, embed) {
 }
 
 // ============================================================
-// PALAVRÕES — com word boundary pra evitar falsos positivos
+// PALAVRÕES
 // ============================================================
 const PALAVROES = [
-  // Variações de foda
   "foda", "fodas", "fodasse", "fodase", "fudeu", "fudendo", "fudido",
   "foder", "fodam", "fodao", "fodão", "foda-se",
   "vai se foder", "vai foder",
-
-  // Merda
   "merda", "merdinha", "merdao", "merdão",
-
-  // Puta / FDP
   "puta", "puto", "putinha", "putão", "putaria",
   "fdp", "filhadaputa", "filhodaputa",
   "filha da puta", "filho da puta",
   "filha de puta", "filho de puta",
-
-  // Caralho
   "caralho", "carai", "crl",
-
-  // Porra
   "porra", "porrinha", "porrada",
-
-  // Cu — só a palavra sozinha, não pega "curso", "acusar"
   "cuzao", "cuzão", "cuzinho", "cuzona",
   "tomar no cu", "vai tomar no cu", "vtc",
-
-  // Buceta
   "buceta", "bct", "bucetinha", "bucetao", "bucetão",
-
-  // Viado
   "viado", "viadinho", "viadao", "viadão", "viadagem",
-
-  // Corno
   "corno", "corna", "cornao", "cornão",
-
-  // Arrombado
   "arrombado", "arrombada", "arrombao", "arrombão",
-
-  // Idiota / Imbecil
   "idiota", "imbecil",
-
-  // Otário
   "otario", "otário", "otarinho",
-
-  // Babaca
   "babaca", "babaquice",
-
-  // Safado
   "safado", "safada", "safadao", "safadão", "safadinha",
-
-  // Vagabundo
   "vagabundo", "vagabunda", "vagabundao", "vagabundão",
-
-  // Bosta
   "bosta", "bostinha", "bostao", "bostão",
-
-  // Cagar
   "cagando", "cagar", "cagou", "cagão", "caguei", "cagada",
-
-  // Piranha
   "piranha", "piranhao", "piranhão",
-
-  // Piroca / Rola
   "piroca", "pirocao", "pirocão",
   "rolinha", "rolao", "rolão",
-
-  // Cacete
   "cacete", "cacetao", "cacetão",
-
-  // Punheta
   "punheta", "punhetao", "punhetão", "punheteiro",
-
-  // Broxa
   "broxa", "broxou", "broxar", "broxada",
-
-  // Desgraça
   "desgraça", "desgraçado", "desgracado", "desgraçada",
-
-  // Escroto
   "escroto", "escrota", "escrotao", "escrotão",
-
-  // Retardado
   "retardado", "retardada", "retardadao", "retardadão",
-
-  // Cretino
   "cretino", "cretina", "cretinagem",
-
-  // Abreviações
   "pqp", "vsf", "tmnc", "tnc", "kct", "vtmc",
-
-  // Família
   "sua mae", "sua mãe", "sua vó", "sua vo",
-  "vai se foder", "vai a merda", "vai se ferrar",
-
-  // Racismo / nazismo
+  "vai a merda", "vai se ferrar",
   "nazista", "nazismo", "racista", "racismo",
   "fascista", "fascismo", "terrorista",
-
-  // Outros
   "lazarento", "prostituta",
   "nojento", "nojenta",
   "escoria", "escória",
 ];
 
-// Palavras que precisam ser exatas (word boundary) pra não pegar falso positivo
 const PALAVROES_EXATAS = [
   "cu", "lixo", "burro", "burra", "anta", "pinto",
   "rola", "merd", "porr", "bct", "inutil", "inútil",
@@ -176,23 +142,18 @@ function buildPattern(word) {
   return word.split("").map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "+").join("");
 }
 
-// Padrões normais (podem estar dentro de outras palavras)
-const PADROES = PALAVROES.map(
-  (p) => new RegExp(buildPattern(p), "gi")
-);
-
-// Padrões exatos (word boundary — só detecta a palavra sozinha)
-const PADROES_EXATOS = PALAVROES_EXATAS.map(
-  (p) => new RegExp(`\\b${buildPattern(p)}\\b`, "gi")
-);
+const PADROES        = PALAVROES.map((p) => new RegExp(buildPattern(p), "gi"));
+const PADROES_EXATOS = PALAVROES_EXATAS.map((p) => new RegExp(`\\b${buildPattern(p)}\\b`, "gi"));
 
 function contemPalavrão(texto) {
-  const todosPadroes = [...PADROES, ...PADROES_EXATOS];
-  return todosPadroes.some((regex) => { regex.lastIndex = 0; return regex.test(texto); });
+  return [...PADROES, ...PADROES_EXATOS].some((regex) => {
+    regex.lastIndex = 0;
+    return regex.test(texto);
+  });
 }
 
 // ============================================================
-// BOT PRONTO — registro de comandos
+// BOT PRONTO
 // ============================================================
 client.once("clientReady", async () => {
   console.log(`✅ Bot online como ${client.user.tag}`);
@@ -258,6 +219,23 @@ client.once("clientReady", async () => {
       ),
 
     new SlashCommandBuilder()
+      .setName("inventario")
+      .setDescription("Veja seus itens comprados"),
+
+    new SlashCommandBuilder()
+      .setName("usar")
+      .setDescription("Usa um item do seu inventário")
+      .addStringOption((opt) =>
+        opt.setName("item").setDescription("ID do item (silenciador, apelido, caixa)").setRequired(true)
+      )
+      .addUserOption((opt) =>
+        opt.setName("usuario").setDescription("Alvo (necessário para silenciador e apelido)").setRequired(false)
+      )
+      .addStringOption((opt) =>
+        opt.setName("novo-apelido").setDescription("Novo apelido (necessário para apelido)").setRequired(false)
+      ),
+
+    new SlashCommandBuilder()
       .setName("rank")
       .setDescription("Veja o ranking dos membros mais ricos"),
 
@@ -269,6 +247,16 @@ client.once("clientReady", async () => {
       )
       .addIntegerOption((opt) =>
         opt.setName("quantidade").setDescription("Quantas moedas dar").setRequired(true)
+      ),
+
+    new SlashCommandBuilder()
+      .setName("apostar")
+      .setDescription("Desafia alguém para uma aposta de ZéCoins")
+      .addUserOption((opt) =>
+        opt.setName("usuario").setDescription("Quem você quer desafiar").setRequired(true)
+      )
+      .addIntegerOption((opt) =>
+        opt.setName("valor").setDescription("Quantas ZéCoins apostar").setRequired(true)
       ),
   ].map((cmd) => cmd.toJSON());
 
@@ -287,7 +275,6 @@ client.once("clientReady", async () => {
 client.on("messageCreate", async (message) => {
   if (message.author.bot || !message.guild) return;
 
-  // ---- AUTO-CHECK SUGESTÕES ----
   if (message.channel.id === CANAL_SUGESTOES_ID) {
     try {
       await message.react("✅");
@@ -298,15 +285,6 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // ---- COMANDOS DE TEXTO ----
-  if (message.content.startsWith("!clearwarns")) {
-    if (!message.member.permissions.has("ManageGuild")) return;
-    const member = message.mentions.members.first();
-    if (!member) return message.reply("Menciona um usuário.");
-    return message.reply(`✅ Feito!`);
-  }
-
-  // ---- AUTOMOD ----
   if (!contemPalavrão(message.content)) return;
 
   const temCargoIsento = message.member.roles.cache.some((role) =>
@@ -319,17 +297,13 @@ client.on("messageCreate", async (message) => {
 
   try { await message.delete(); } catch {}
 
-  // Só muta, sem warn
   try {
     await message.member.timeout(MUTE_MS, "Automod: linguagem inapropriada");
-
     await message.channel.send(
       `⚠️ ${message.author}, linguagem inapropriada! Você foi mutado por 5 minutos.`
     );
-
     console.log(`[MUTE] ${message.author.tag} mutado.`);
 
-    // Log no canal
     const logEmbed = new EmbedBuilder()
       .setTitle("🔇 Mute Automático")
       .setColor("Orange")
@@ -342,16 +316,81 @@ client.on("messageCreate", async (message) => {
       .setTimestamp();
 
     await enviarLog(message.guild, logEmbed);
-
   } catch (err) {
     console.error(`[ERRO MUTE] ${err.message}`);
   }
 });
 
 // ============================================================
-// SLASH COMMANDS
+// SLASH COMMANDS + BOTÕES
 // ============================================================
 client.on("interactionCreate", async (interaction) => {
+
+  // ---- BOTÕES DA APOSTA ----
+  if (interaction.isButton()) {
+    const aposta = apostas[interaction.message.id];
+    if (!aposta) return;
+
+    if (interaction.user.id !== aposta.desafiado) {
+      return interaction.reply({ content: "❌ Essa aposta não é com você!", ephemeral: true });
+    }
+
+    if (interaction.customId === "aposta_recusar") {
+      delete apostas[interaction.message.id];
+      await interaction.update({
+        content: `❌ <@${aposta.desafiado}> recusou a aposta!`,
+        embeds: [],
+        components: [],
+      });
+      return;
+    }
+
+    if (interaction.customId === "aposta_aceitar") {
+      const perfilDesafiante = getPerfil(aposta.desafiante);
+      const perfilDesafiado  = getPerfil(aposta.desafiado);
+
+      if (perfilDesafiante.saldo < aposta.valor) {
+        delete apostas[interaction.message.id];
+        return interaction.update({
+          content: `❌ <@${aposta.desafiante}> não tem mais ZéCoins suficientes!`,
+          embeds: [],
+          components: [],
+        });
+      }
+
+      if (perfilDesafiado.saldo < aposta.valor) {
+        delete apostas[interaction.message.id];
+        return interaction.update({
+          content: `❌ Você não tem ZéCoins suficientes para aceitar!`,
+          embeds: [],
+          components: [],
+        });
+      }
+
+      const resultado  = Math.random() < 0.5 ? "cara" : "coroa";
+      const vencedorId = resultado === "cara" ? aposta.desafiante : aposta.desafiado;
+      const perdedorId = resultado === "cara" ? aposta.desafiado  : aposta.desafiante;
+
+      getPerfil(vencedorId).saldo += aposta.valor;
+      getPerfil(perdedorId).saldo -= aposta.valor;
+
+      delete apostas[interaction.message.id];
+
+      const embed = new EmbedBuilder()
+        .setTitle("🪙 Resultado da Aposta!")
+        .setColor("Gold")
+        .addFields(
+          { name: "Resultado",   value: resultado === "cara" ? "🟡 CARA" : "⚪ COROA" },
+          { name: "🏆 Vencedor", value: `<@${vencedorId}> ganhou **${aposta.valor} ZéCoins**!` },
+          { name: "💸 Perdedor", value: `<@${perdedorId}> perdeu **${aposta.valor} ZéCoins**` },
+        )
+        .setTimestamp();
+
+      await interaction.update({ content: "", embeds: [embed], components: [] });
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   // ---- /say ----
@@ -369,12 +408,10 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.commandName === "avatar") {
     const user      = interaction.options.getUser("usuario") || interaction.user;
     const avatarUrl = user.displayAvatarURL({ size: 1024, extension: "png" });
-
     const embed = new EmbedBuilder()
       .setTitle(`Avatar de ${user.username}`)
       .setImage(avatarUrl)
       .setColor("Blue");
-
     await interaction.reply({ embeds: [embed] });
   }
 
@@ -383,7 +420,6 @@ client.on("interactionCreate", async (interaction) => {
     if (!interaction.member.permissions.has("Administrator")) {
       return interaction.reply({ content: "❌ Sem permissão.", ephemeral: true });
     }
-
     const link   = interaction.options.getString("link");
     const canal  = interaction.options.getChannel("canal");
     const titulo = interaction.options.getString("titulo");
@@ -402,7 +438,6 @@ client.on("interactionCreate", async (interaction) => {
       .setTimestamp();
 
     if (thumbnailUrl) embed.setImage(thumbnailUrl);
-
     await canal.send({ content: "🔔 **Fala galera, vídeo novo no canal!**", embeds: [embed] });
     await interaction.reply({ content: "✅ Anúncio enviado!", ephemeral: true });
   }
@@ -454,7 +489,6 @@ client.on("interactionCreate", async (interaction) => {
 
     const trabalho = trabalhos[Math.floor(Math.random() * trabalhos.length)];
     const ganho    = Math.floor(Math.random() * 26) + 15;
-
     perfil.saldo += ganho;
     perfil.ultimoTrabalho = agora;
 
@@ -467,13 +501,11 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.commandName === "carteira") {
     const user   = interaction.options.getUser("usuario") || interaction.user;
     const perfil = getPerfil(user.id);
-
-    const embed = new EmbedBuilder()
+    const embed  = new EmbedBuilder()
       .setTitle(`💰 Carteira de ${user.username}`)
       .setDescription(`Saldo: **${perfil.saldo} ZéCoins**`)
       .setColor("Gold")
       .setThumbnail(user.displayAvatarURL());
-
     await interaction.reply({ embeds: [embed] });
   }
 
@@ -484,11 +516,10 @@ client.on("interactionCreate", async (interaction) => {
       .setColor("Purple")
       .setDescription(
         LOJA.map((item) =>
-          `**${item.nome}** — \`${item.preco} ZéCoins\`\nID: \`${item.id}\``
+          `**${item.nome}** — \`${item.preco} ZéCoins\`\nID: \`${item.id}\`${item.descricao ? `\n*${item.descricao}*` : ""}`
         ).join("\n\n")
       )
       .setFooter({ text: "Use /comprar item:ID para comprar" });
-
     await interaction.reply({ embeds: [embed] });
   }
 
@@ -498,10 +529,7 @@ client.on("interactionCreate", async (interaction) => {
     const item   = LOJA.find((i) => i.id === itemId);
 
     if (!item) {
-      return interaction.reply({
-        content: "❌ Item não encontrado. Use `/loja` pra ver os IDs.",
-        ephemeral: true,
-      });
+      return interaction.reply({ content: "❌ Item não encontrado. Use `/loja` pra ver os IDs.", ephemeral: true });
     }
 
     const perfil = getPerfil(interaction.user.id);
@@ -515,16 +543,156 @@ client.on("interactionCreate", async (interaction) => {
 
     perfil.saldo -= item.preco;
 
-    try {
-      await interaction.member.roles.add(item.roleId);
-      await interaction.reply(`✅ Você comprou **${item.nome}**! Cargo adicionado.`);
-    } catch (err) {
-      perfil.saldo += item.preco;
-      console.error("[ERRO COMPRA]", err.message);
-      await interaction.reply({
-        content: "❌ Erro ao adicionar o cargo. Avisa um admin!",
-        ephemeral: true,
-      });
+    if (item.tipo === "cargo") {
+      try {
+        await interaction.member.roles.add(item.roleId);
+        await interaction.reply(`✅ Você comprou **${item.nome}**! Cargo adicionado.`);
+      } catch (err) {
+        perfil.saldo += item.preco;
+        await interaction.reply({ content: "❌ Erro ao adicionar o cargo. Avisa um admin!", ephemeral: true });
+      }
+    } else {
+      const inv = getInventario(interaction.user.id);
+      inv[item.id] = (inv[item.id] || 0) + 1;
+      await interaction.reply(`✅ Você comprou **${item.nome}**! Use \`/usar item:${item.id}\` para utilizar.`);
+    }
+  }
+
+  // ---- /inventario ----
+  if (interaction.commandName === "inventario") {
+    const inv   = getInventario(interaction.user.id);
+    const itens = Object.entries(inv).filter(([, qtd]) => qtd > 0);
+
+    if (itens.length === 0) {
+      return interaction.reply({ content: "🎒 Seu inventário está vazio!", ephemeral: true });
+    }
+
+    const linhas = itens.map(([id, qtd]) => {
+      const item = LOJA.find((i) => i.id === id);
+      return `${item ? item.nome : id} — **${qtd}x**`;
+    });
+
+    const embed = new EmbedBuilder()
+      .setTitle(`🎒 Inventário de ${interaction.user.username}`)
+      .setDescription(linhas.join("\n"))
+      .setColor("Blue");
+
+    await interaction.reply({ embeds: [embed] });
+  }
+
+  // ---- /usar ----
+  if (interaction.commandName === "usar") {
+    const itemId  = interaction.options.getString("item");
+    const alvo    = interaction.options.getUser("usuario");
+    const novoApe = interaction.options.getString("novo-apelido");
+    const inv     = getInventario(interaction.user.id);
+
+    if (!inv[itemId] || inv[itemId] <= 0) {
+      return interaction.reply({ content: "❌ Você não tem esse item no inventário!", ephemeral: true });
+    }
+
+    // ---- SILENCIADOR ----
+    if (itemId === "silenciador") {
+      if (!alvo) {
+        return interaction.reply({ content: "❌ Menciona um usuário! Ex: `/usar item:silenciador usuario:@fulano`", ephemeral: true });
+      }
+      const membro = await interaction.guild.members.fetch(alvo.id).catch(() => null);
+      if (!membro) return interaction.reply({ content: "❌ Usuário não encontrado.", ephemeral: true });
+
+      try {
+        await membro.timeout(5 * 60 * 1000, `Silenciador usado por ${interaction.user.tag}`);
+        inv[itemId]--;
+        await interaction.reply(`🔇 **${interaction.user}** usou um Silenciador em **${alvo}**! Mutado por 5 minutos.`);
+
+        const logEmbed = new EmbedBuilder()
+          .setTitle("🔇 Silenciador Usado")
+          .setColor("Orange")
+          .addFields(
+            { name: "Usado por", value: `${interaction.user.tag}` },
+            { name: "Alvo",      value: `${alvo.tag}` },
+            { name: "Duração",   value: "5 minutos" }
+          )
+          .setTimestamp();
+        await enviarLog(interaction.guild, logEmbed);
+      } catch {
+        await interaction.reply({ content: "❌ Não consegui mutar esse usuário. Ele pode ter cargo alto demais!", ephemeral: true });
+      }
+    }
+
+    // ---- APELIDO ----
+    else if (itemId === "apelido") {
+      if (!alvo || !novoApe) {
+        return interaction.reply({
+          content: "❌ Usa assim: `/usar item:apelido usuario:@fulano novo-apelido:NovoNome`",
+          ephemeral: true,
+        });
+      }
+      const membro = await interaction.guild.members.fetch(alvo.id).catch(() => null);
+      if (!membro) return interaction.reply({ content: "❌ Usuário não encontrado.", ephemeral: true });
+
+      const apelidoAntigo = membro.nickname || membro.user.username;
+
+      try {
+        await membro.setNickname(novoApe, `Apelido usado por ${interaction.user.tag}`);
+        inv[itemId]--;
+        await interaction.reply(`🏷️ **${interaction.user}** mudou o apelido de **${alvo}** para **${novoApe}** por 1 hora!`);
+
+        setTimeout(async () => {
+          try {
+            await membro.setNickname(apelidoAntigo === membro.user.username ? null : apelidoAntigo);
+          } catch {}
+        }, 60 * 60 * 1000);
+
+        const logEmbed = new EmbedBuilder()
+          .setTitle("🏷️ Apelido Alterado")
+          .setColor("Blue")
+          .addFields(
+            { name: "Usado por",      value: `${interaction.user.tag}` },
+            { name: "Alvo",           value: `${alvo.tag}` },
+            { name: "Apelido antigo", value: apelidoAntigo },
+            { name: "Apelido novo",   value: novoApe },
+            { name: "Duração",        value: "1 hora" }
+          )
+          .setTimestamp();
+        await enviarLog(interaction.guild, logEmbed);
+      } catch {
+        await interaction.reply({ content: "❌ Não consegui mudar o apelido. Ele pode ter cargo alto demais!", ephemeral: true });
+      }
+    }
+
+    // ---- CAIXA MISTERIOSA ----
+    else if (itemId === "caixa") {
+      const premios = [
+        { valor: 100,   chance: 40, label: "😐 Sorte fraca" },
+        { valor: 500,   chance: 30, label: "🙂 Sorte boa" },
+        { valor: 1000,  chance: 15, label: "😄 Boa sorte!" },
+        { valor: 3000,  chance: 10, label: "🤩 Muita sorte!" },
+        { valor: 10000, chance: 5,  label: "🤑 JACKPOT!" },
+      ];
+
+      const sorteio = Math.random() * 100;
+      let acumulado = 0;
+      let premio = premios[0];
+
+      for (const p of premios) {
+        acumulado += p.chance;
+        if (sorteio <= acumulado) { premio = p; break; }
+      }
+
+      getPerfil(interaction.user.id).saldo += premio.valor;
+      inv[itemId]--;
+
+      const embed = new EmbedBuilder()
+        .setTitle("🎁 Caixa Misteriosa Aberta!")
+        .setColor("Gold")
+        .setDescription(`${premio.label}\n\n${interaction.user} ganhou **${premio.valor} ZéCoins**!`)
+        .setTimestamp();
+
+      await interaction.reply({ embeds: [embed] });
+    }
+
+    else {
+      await interaction.reply({ content: "❌ Esse item não pode ser usado assim.", ephemeral: true });
     }
   }
 
@@ -560,16 +728,79 @@ client.on("interactionCreate", async (interaction) => {
     if (!interaction.member.permissions.has("Administrator")) {
       return interaction.reply({ content: "❌ Sem permissão.", ephemeral: true });
     }
-
     const user   = interaction.options.getUser("usuario");
     const qtd    = interaction.options.getInteger("quantidade");
     const perfil = getPerfil(user.id);
-
     perfil.saldo += qtd;
+    await interaction.reply(`✅ ${user} recebeu **${qtd} ZéCoins**! Saldo atual: **${perfil.saldo}**`);
+  }
 
-    await interaction.reply(
-      `✅ ${user} recebeu **${qtd} ZéCoins**! Saldo atual: **${perfil.saldo}**`
+  // ---- /apostar ----
+  if (interaction.commandName === "apostar") {
+    const desafiado = interaction.options.getUser("usuario");
+    const valor     = interaction.options.getInteger("valor");
+
+    if (desafiado.id === interaction.user.id) {
+      return interaction.reply({ content: "❌ Você não pode apostar contra si mesmo!", ephemeral: true });
+    }
+    if (desafiado.bot) {
+      return interaction.reply({ content: "❌ Você não pode apostar contra um bot!", ephemeral: true });
+    }
+    if (valor <= 0) {
+      return interaction.reply({ content: "❌ O valor precisa ser maior que 0!", ephemeral: true });
+    }
+
+    const perfilDesafiante = getPerfil(interaction.user.id);
+    if (perfilDesafiante.saldo < valor) {
+      return interaction.reply({
+        content: `❌ Saldo insuficiente! Você tem **${perfilDesafiante.saldo} ZéCoins**.`,
+        ephemeral: true,
+      });
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle("🎲 Desafio de Aposta!")
+      .setColor("Gold")
+      .setDescription(
+        `${interaction.user} desafiou ${desafiado} para uma aposta de **${valor} ZéCoins**!\n\n` +
+        `🪙 O resultado será decidido por **cara ou coroa**.\n` +
+        `${desafiado}, você aceita o desafio?`
+      )
+      .setFooter({ text: "A aposta expira em 60 segundos" })
+      .setTimestamp();
+
+    const botoes = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("aposta_aceitar")
+        .setLabel("✅ Aceitar")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId("aposta_recusar")
+        .setLabel("❌ Recusar")
+        .setStyle(ButtonStyle.Danger),
     );
+
+    const msg = await interaction.reply({
+      content: `${desafiado}`,
+      embeds: [embed],
+      components: [botoes],
+      fetchReply: true,
+    });
+
+    apostas[msg.id] = {
+      desafiante: interaction.user.id,
+      desafiado:  desafiado.id,
+      valor,
+    };
+
+    setTimeout(async () => {
+      if (apostas[msg.id]) {
+        delete apostas[msg.id];
+        try {
+          await msg.edit({ content: "⏰ A aposta expirou!", embeds: [], components: [] });
+        } catch {}
+      }
+    }, 60000);
   }
 });
 
