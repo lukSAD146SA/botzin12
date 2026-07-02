@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require("discord.js");
 
 const client = new Client({
   intents: [
@@ -14,6 +14,7 @@ const GUILD_ID           = "1508302017980924064";
 const MUTE_MS            = 5 * 60 * 1000;
 const CANAL_SUGESTOES_ID = "1511518813701804062";
 const CANAL_LOGS_ID      = "1510353328821764289";
+const CANAL_AVISO_ID     = "1508390560795197500";
 
 const economia    = {};
 const apostas     = {};
@@ -257,6 +258,46 @@ client.once("clientReady", async () => {
       )
       .addIntegerOption((opt) =>
         opt.setName("valor").setDescription("Quantas ZéCoins apostar").setRequired(true)
+      ),
+
+    new SlashCommandBuilder()
+      .setName("lockdown")
+      .setDescription("[ADMIN] Ativa ou desativa o lockdown do servidor")
+      .addStringOption((opt) =>
+        opt.setName("motivo").setDescription("Motivo do lockdown (opcional)").setRequired(false)
+      ),
+
+    new SlashCommandBuilder()
+      .setName("esconder-canal")
+      .setDescription("[ADMIN] Torna o canal invisível para membros comuns"),
+
+    new SlashCommandBuilder()
+      .setName("mostrar-canal")
+      .setDescription("[ADMIN] Torna o canal visível novamente para membros comuns"),
+
+    new SlashCommandBuilder()
+      .setName("lock")
+      .setDescription("[ADMIN] Bloqueia envio de mensagens no canal atual")
+      .addStringOption((opt) =>
+        opt.setName("motivo").setDescription("Motivo do lock (opcional)").setRequired(false)
+      ),
+
+    new SlashCommandBuilder()
+      .setName("unlock")
+      .setDescription("[ADMIN] Desbloqueia envio de mensagens no canal atual"),
+
+    new SlashCommandBuilder()
+      .setName("slowmode")
+      .setDescription("[ADMIN] Ativa modo lento no canal")
+      .addIntegerOption((opt) =>
+        opt.setName("segundos").setDescription("Segundos entre mensagens (0 para desativar)").setRequired(true)
+      ),
+
+    new SlashCommandBuilder()
+      .setName("limpar")
+      .setDescription("[ADMIN] Apaga mensagens do canal")
+      .addIntegerOption((opt) =>
+        opt.setName("quantidade").setDescription("Quantas mensagens apagar (máx 100)").setRequired(true)
       ),
   ].map((cmd) => cmd.toJSON());
 
@@ -591,11 +632,8 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.reply({ content: "❌ Você não tem esse item no inventário!", ephemeral: true });
     }
 
-    // ---- SILENCIADOR ----
     if (itemId === "silenciador") {
-      if (!alvo) {
-        return interaction.reply({ content: "❌ Menciona um usuário! Ex: `/usar item:silenciador usuario:@fulano`", ephemeral: true });
-      }
+      if (!alvo) return interaction.reply({ content: "❌ Menciona um usuário!", ephemeral: true });
       const membro = await interaction.guild.members.fetch(alvo.id).catch(() => null);
       if (!membro) return interaction.reply({ content: "❌ Usuário não encontrado.", ephemeral: true });
 
@@ -603,64 +641,47 @@ client.on("interactionCreate", async (interaction) => {
         await membro.timeout(5 * 60 * 1000, `Silenciador usado por ${interaction.user.tag}`);
         inv[itemId]--;
         await interaction.reply(`🔇 **${interaction.user}** usou um Silenciador em **${alvo}**! Mutado por 5 minutos.`);
-
         const logEmbed = new EmbedBuilder()
-          .setTitle("🔇 Silenciador Usado")
-          .setColor("Orange")
+          .setTitle("🔇 Silenciador Usado").setColor("Orange")
           .addFields(
             { name: "Usado por", value: `${interaction.user.tag}` },
             { name: "Alvo",      value: `${alvo.tag}` },
             { name: "Duração",   value: "5 minutos" }
-          )
-          .setTimestamp();
+          ).setTimestamp();
         await enviarLog(interaction.guild, logEmbed);
       } catch {
-        await interaction.reply({ content: "❌ Não consegui mutar esse usuário. Ele pode ter cargo alto demais!", ephemeral: true });
+        await interaction.reply({ content: "❌ Não consegui mutar esse usuário!", ephemeral: true });
       }
     }
 
-    // ---- APELIDO ----
     else if (itemId === "apelido") {
-      if (!alvo || !novoApe) {
-        return interaction.reply({
-          content: "❌ Usa assim: `/usar item:apelido usuario:@fulano novo-apelido:NovoNome`",
-          ephemeral: true,
-        });
-      }
+      if (!alvo || !novoApe) return interaction.reply({ content: "❌ Usa assim: `/usar item:apelido usuario:@fulano novo-apelido:Nome`", ephemeral: true });
       const membro = await interaction.guild.members.fetch(alvo.id).catch(() => null);
       if (!membro) return interaction.reply({ content: "❌ Usuário não encontrado.", ephemeral: true });
 
       const apelidoAntigo = membro.nickname || membro.user.username;
-
       try {
-        await membro.setNickname(novoApe, `Apelido usado por ${interaction.user.tag}`);
+        await membro.setNickname(novoApe);
         inv[itemId]--;
         await interaction.reply(`🏷️ **${interaction.user}** mudou o apelido de **${alvo}** para **${novoApe}** por 1 hora!`);
-
         setTimeout(async () => {
-          try {
-            await membro.setNickname(apelidoAntigo === membro.user.username ? null : apelidoAntigo);
-          } catch {}
+          try { await membro.setNickname(apelidoAntigo === membro.user.username ? null : apelidoAntigo); } catch {}
         }, 60 * 60 * 1000);
-
         const logEmbed = new EmbedBuilder()
-          .setTitle("🏷️ Apelido Alterado")
-          .setColor("Blue")
+          .setTitle("🏷️ Apelido Alterado").setColor("Blue")
           .addFields(
             { name: "Usado por",      value: `${interaction.user.tag}` },
             { name: "Alvo",           value: `${alvo.tag}` },
             { name: "Apelido antigo", value: apelidoAntigo },
             { name: "Apelido novo",   value: novoApe },
             { name: "Duração",        value: "1 hora" }
-          )
-          .setTimestamp();
+          ).setTimestamp();
         await enviarLog(interaction.guild, logEmbed);
       } catch {
-        await interaction.reply({ content: "❌ Não consegui mudar o apelido. Ele pode ter cargo alto demais!", ephemeral: true });
+        await interaction.reply({ content: "❌ Não consegui mudar o apelido!", ephemeral: true });
       }
     }
 
-    // ---- CAIXA MISTERIOSA ----
     else if (itemId === "caixa") {
       const premios = [
         { valor: 100,   chance: 40, label: "😐 Sorte fraca" },
@@ -673,7 +694,6 @@ client.on("interactionCreate", async (interaction) => {
       const sorteio = Math.random() * 100;
       let acumulado = 0;
       let premio = premios[0];
-
       for (const p of premios) {
         acumulado += p.chance;
         if (sorteio <= acumulado) { premio = p; break; }
@@ -687,7 +707,6 @@ client.on("interactionCreate", async (interaction) => {
         .setColor("Gold")
         .setDescription(`${premio.label}\n\n${interaction.user} ganhou **${premio.valor} ZéCoins**!`)
         .setTimestamp();
-
       await interaction.reply({ embeds: [embed] });
     }
 
@@ -702,9 +721,7 @@ client.on("interactionCreate", async (interaction) => {
       .sort(([, a], [, b]) => b.saldo - a.saldo)
       .slice(0, 10);
 
-    if (ranking.length === 0) {
-      return interaction.reply("Ninguém tem ZéCoins ainda!");
-    }
+    if (ranking.length === 0) return interaction.reply("Ninguém tem ZéCoins ainda!");
 
     const linhas = await Promise.all(
       ranking.map(async ([userId, dados], index) => {
@@ -719,7 +736,6 @@ client.on("interactionCreate", async (interaction) => {
       .setTitle("🏆 Ranking ZéCoins")
       .setDescription(linhas.join("\n"))
       .setColor("Gold");
-
     await interaction.reply({ embeds: [embed] });
   }
 
@@ -740,15 +756,9 @@ client.on("interactionCreate", async (interaction) => {
     const desafiado = interaction.options.getUser("usuario");
     const valor     = interaction.options.getInteger("valor");
 
-    if (desafiado.id === interaction.user.id) {
-      return interaction.reply({ content: "❌ Você não pode apostar contra si mesmo!", ephemeral: true });
-    }
-    if (desafiado.bot) {
-      return interaction.reply({ content: "❌ Você não pode apostar contra um bot!", ephemeral: true });
-    }
-    if (valor <= 0) {
-      return interaction.reply({ content: "❌ O valor precisa ser maior que 0!", ephemeral: true });
-    }
+    if (desafiado.id === interaction.user.id) return interaction.reply({ content: "❌ Você não pode apostar contra si mesmo!", ephemeral: true });
+    if (desafiado.bot) return interaction.reply({ content: "❌ Você não pode apostar contra um bot!", ephemeral: true });
+    if (valor <= 0) return interaction.reply({ content: "❌ O valor precisa ser maior que 0!", ephemeral: true });
 
     const perfilDesafiante = getPerfil(interaction.user.id);
     if (perfilDesafiante.saldo < valor) {
@@ -770,14 +780,8 @@ client.on("interactionCreate", async (interaction) => {
       .setTimestamp();
 
     const botoes = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId("aposta_aceitar")
-        .setLabel("✅ Aceitar")
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId("aposta_recusar")
-        .setLabel("❌ Recusar")
-        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId("aposta_aceitar").setLabel("✅ Aceitar").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("aposta_recusar").setLabel("❌ Recusar").setStyle(ButtonStyle.Danger),
     );
 
     const msg = await interaction.reply({
@@ -787,20 +791,229 @@ client.on("interactionCreate", async (interaction) => {
       fetchReply: true,
     });
 
-    apostas[msg.id] = {
-      desafiante: interaction.user.id,
-      desafiado:  desafiado.id,
-      valor,
-    };
+    apostas[msg.id] = { desafiante: interaction.user.id, desafiado: desafiado.id, valor };
 
     setTimeout(async () => {
       if (apostas[msg.id]) {
         delete apostas[msg.id];
-        try {
-          await msg.edit({ content: "⏰ A aposta expirou!", embeds: [], components: [] });
-        } catch {}
+        try { await msg.edit({ content: "⏰ A aposta expirou!", embeds: [], components: [] }); } catch {}
       }
     }, 60000);
+  }
+
+  // ---- /lockdown ----
+  if (interaction.commandName === "lockdown") {
+    if (!interaction.member.permissions.has("Administrator")) {
+      return interaction.reply({ content: "❌ Sem permissão.", ephemeral: true });
+    }
+
+    const motivo  = interaction.options.getString("motivo") || "Sem motivo especificado";
+    const canais  = await interaction.guild.channels.fetch();
+    const everyone = interaction.guild.roles.everyone;
+
+    await interaction.deferReply({ ephemeral: true });
+
+    let fechados = 0;
+
+    for (const [, canal] of canais) {
+      // Pula o canal de aviso e canais que não são de texto
+      if (canal.id === CANAL_AVISO_ID) continue;
+      if (!canal.isTextBased()) continue;
+
+      try {
+        await canal.permissionOverwrites.edit(everyone, {
+          SendMessages: false,
+          ViewChannel: false,
+        });
+        fechados++;
+      } catch {}
+    }
+
+    // Canal de aviso fica aberto e visível
+    const canalAviso = await interaction.guild.channels.fetch(CANAL_AVISO_ID).catch(() => null);
+    if (canalAviso) {
+      await canalAviso.permissionOverwrites.edit(everyone, {
+        SendMessages: false,
+        ViewChannel: true,
+      });
+
+      await canalAviso.send({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle("🔒 SERVIDOR EM LOCKDOWN")
+            .setColor("Red")
+            .setDescription(`O servidor foi bloqueado por um administrador.\n\n**Motivo:** ${motivo}`)
+            .setTimestamp()
+        ]
+      });
+    }
+
+    const logEmbed = new EmbedBuilder()
+      .setTitle("🔒 Lockdown Ativado")
+      .setColor("Red")
+      .addFields(
+        { name: "Admin",   value: `${interaction.user.tag}` },
+        { name: "Motivo",  value: motivo },
+        { name: "Canais fechados", value: `${fechados}` }
+      )
+      .setTimestamp();
+    await enviarLog(interaction.guild, logEmbed);
+
+    await interaction.editReply(`✅ Lockdown ativado! **${fechados}** canais fechados.`);
+  }
+
+  // ---- /unlockdown ----
+  // Para desativar o lockdown basta usar /lockdown de novo — mas vamos separar em comando próprio
+  // Adicione esse comando se quiser desativar: /unlockdown
+  // Por ora o lockdown é desfeito manualmente no Discord ou com /mostrar-canal em cada canal
+
+  // ---- /esconder-canal ----
+  if (interaction.commandName === "esconder-canal") {
+    if (!interaction.member.permissions.has("Administrator")) {
+      return interaction.reply({ content: "❌ Sem permissão.", ephemeral: true });
+    }
+
+    const everyone = interaction.guild.roles.everyone;
+    try {
+      await interaction.channel.permissionOverwrites.edit(everyone, { ViewChannel: false });
+      await interaction.reply({ content: `✅ Canal **${interaction.channel.name}** está agora invisível para membros.`, ephemeral: true });
+
+      const logEmbed = new EmbedBuilder()
+        .setTitle("🙈 Canal Escondido")
+        .setColor("Grey")
+        .addFields(
+          { name: "Admin", value: `${interaction.user.tag}` },
+          { name: "Canal", value: `${interaction.channel.name}` }
+        )
+        .setTimestamp();
+      await enviarLog(interaction.guild, logEmbed);
+    } catch (err) {
+      await interaction.reply({ content: "❌ Não consegui esconder o canal.", ephemeral: true });
+    }
+  }
+
+  // ---- /mostrar-canal ----
+  if (interaction.commandName === "mostrar-canal") {
+    if (!interaction.member.permissions.has("Administrator")) {
+      return interaction.reply({ content: "❌ Sem permissão.", ephemeral: true });
+    }
+
+    const everyone = interaction.guild.roles.everyone;
+    try {
+      await interaction.channel.permissionOverwrites.edit(everyone, { ViewChannel: true, SendMessages: true });
+      await interaction.reply({ content: `✅ Canal **${interaction.channel.name}** está visível novamente.`, ephemeral: true });
+
+      const logEmbed = new EmbedBuilder()
+        .setTitle("👁️ Canal Revelado")
+        .setColor("Green")
+        .addFields(
+          { name: "Admin", value: `${interaction.user.tag}` },
+          { name: "Canal", value: `${interaction.channel.name}` }
+        )
+        .setTimestamp();
+      await enviarLog(interaction.guild, logEmbed);
+    } catch {
+      await interaction.reply({ content: "❌ Não consegui mostrar o canal.", ephemeral: true });
+    }
+  }
+
+  // ---- /lock ----
+  if (interaction.commandName === "lock") {
+    if (!interaction.member.permissions.has("Administrator")) {
+      return interaction.reply({ content: "❌ Sem permissão.", ephemeral: true });
+    }
+
+    const motivo   = interaction.options.getString("motivo") || "Sem motivo especificado";
+    const everyone = interaction.guild.roles.everyone;
+
+    try {
+      await interaction.channel.permissionOverwrites.edit(everyone, { SendMessages: false });
+      await interaction.reply(`🔒 Canal bloqueado! **Motivo:** ${motivo}`);
+
+      const logEmbed = new EmbedBuilder()
+        .setTitle("🔒 Canal Bloqueado")
+        .setColor("Orange")
+        .addFields(
+          { name: "Admin",  value: `${interaction.user.tag}` },
+          { name: "Canal",  value: `${interaction.channel.name}` },
+          { name: "Motivo", value: motivo }
+        )
+        .setTimestamp();
+      await enviarLog(interaction.guild, logEmbed);
+    } catch {
+      await interaction.reply({ content: "❌ Não consegui bloquear o canal.", ephemeral: true });
+    }
+  }
+
+  // ---- /unlock ----
+  if (interaction.commandName === "unlock") {
+    if (!interaction.member.permissions.has("Administrator")) {
+      return interaction.reply({ content: "❌ Sem permissão.", ephemeral: true });
+    }
+
+    const everyone = interaction.guild.roles.everyone;
+    try {
+      await interaction.channel.permissionOverwrites.edit(everyone, { SendMessages: true });
+      await interaction.reply(`🔓 Canal desbloqueado!`);
+
+      const logEmbed = new EmbedBuilder()
+        .setTitle("🔓 Canal Desbloqueado")
+        .setColor("Green")
+        .addFields(
+          { name: "Admin", value: `${interaction.user.tag}` },
+          { name: "Canal", value: `${interaction.channel.name}` }
+        )
+        .setTimestamp();
+      await enviarLog(interaction.guild, logEmbed);
+    } catch {
+      await interaction.reply({ content: "❌ Não consegui desbloquear o canal.", ephemeral: true });
+    }
+  }
+
+  // ---- /slowmode ----
+  if (interaction.commandName === "slowmode") {
+    if (!interaction.member.permissions.has("Administrator")) {
+      return interaction.reply({ content: "❌ Sem permissão.", ephemeral: true });
+    }
+
+    const segundos = interaction.options.getInteger("segundos");
+    try {
+      await interaction.channel.setRateLimitPerUser(segundos);
+      if (segundos === 0) {
+        await interaction.reply(`✅ Modo lento desativado!`);
+      } else {
+        await interaction.reply(`🐢 Modo lento ativado: **${segundos} segundos** entre mensagens.`);
+      }
+    } catch {
+      await interaction.reply({ content: "❌ Não consegui ativar o modo lento.", ephemeral: true });
+    }
+  }
+
+  // ---- /limpar ----
+  if (interaction.commandName === "limpar") {
+    if (!interaction.member.permissions.has("Administrator")) {
+      return interaction.reply({ content: "❌ Sem permissão.", ephemeral: true });
+    }
+
+    const quantidade = Math.min(interaction.options.getInteger("quantidade"), 100);
+    try {
+      await interaction.deferReply({ ephemeral: true });
+      const deletadas = await interaction.channel.bulkDelete(quantidade, true);
+      await interaction.editReply(`✅ **${deletadas.size}** mensagens apagadas!`);
+
+      const logEmbed = new EmbedBuilder()
+        .setTitle("🗑️ Mensagens Apagadas")
+        .setColor("Red")
+        .addFields(
+          { name: "Admin",     value: `${interaction.user.tag}` },
+          { name: "Canal",     value: `${interaction.channel.name}` },
+          { name: "Quantidade", value: `${deletadas.size}` }
+        )
+        .setTimestamp();
+      await enviarLog(interaction.guild, logEmbed);
+    } catch {
+      await interaction.editReply("❌ Não consegui apagar as mensagens. Mensagens com mais de 14 dias não podem ser apagadas em massa.");
+    }
   }
 });
 
